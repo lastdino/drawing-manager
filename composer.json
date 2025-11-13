@@ -1,0 +1,26 @@
+{
+  "name": "lastdino/drawing-manager",
+  "description": "Drawing management (folders, tags, revisions) for Laravel 12 with Livewire 3 & Flux UI.",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Lastdino\\DrawingManager\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Lastdino\\DrawingManager\\DrawingManagerServiceProvider"
+      ]
+    }
+  },
+  "require": {
+    "php": ">=8.4",
+    "laravel/framework": "^12.0",
+    "livewire/livewire": "^3.6",
+    "livewire/flux": "^2.6",
+    "spatie/laravel-permission": "^6.10",
+    "spatie/laravel-medialibrary": "^11.12"
+  }
+}
