@@ -16,11 +16,11 @@ Requirements
 ------------
 - PHP >= 8.4
 - Laravel ^12.0
-- Database tables for: `folders`, `drawings`, `tags`, pivot tables `drawing_tag`, `drawing_role`
+- Database tables for: `folders`, `tags`, `drawings`, pivot tables `drawing_tag`, `drawing_role`
 - Spatie packages: `spatie/laravel-permission`, `spatie/laravel-medialibrary`
 - Livewire 3, Flux UI 2
 
-Note: This package ships models (`Lastdino\\DrawingManager\\Models\\{Folder,Drawing,Tag}`) that map to existing host tables. For greenfield projects, you can publish/run the provided migrations when they are added in a future release. For existing apps, continue using your tables — no changes are required.
+Note: This package ships its own Eloquent models (`Lastdino\\DrawingManager\\Models\\{DrawingManagerDrawing,DrawingManagerDrawingFolder,DrawingManagerDrawingTag}`) and migrations for greenfield projects. If your application already has equivalent tables/models, you can keep using them; simply do not run this package's migrations.
 
 Installation
 ------------
@@ -60,34 +60,39 @@ Config `config/drawing-manager.php`:
 - `route_prefix`: UI mount path (default `drawings`)
 - `middleware`: UI middleware (default `['web','auth']`)
 - `authorize_download`: Check policy before streaming files (default `true`)
-- `media_disk`: Disk used by Spatie Media Library (default `public`)
+- `media_disk`: Disk used by Spatie Media Library (default `local`)
 
 4) Routes
 ---------
-The package auto-registers routes:
-- GET `/{prefix}` → drawings index (Livewire component)
-- GET `/{prefix}/{drawing}/latest/{type}` → latest download for type (`pdf`, `dwg`, `dxf`, `step`, `iges`)
-- GET `/{prefix}/revisions/{media}` → specific media download
+The package auto-registers routes (names in parentheses):
+- GET `/{prefix}` → drawings index (Livewire component) (`drawings.index`)
+- GET `/{prefix}/{drawing}/latest/{type}` → download the latest file for type (`pdf`, `dwg`, `dxf`, `step`, `iges`) (`drawings.download.latest`)
+- GET `/{prefix}/revisions/{media}` → download a specific media item (`drawings.download.revision`)
 
-Remove conflicting host routes for `/drawings` if you had any — delegation is complete.
+Remove conflicting host routes under the same prefix (default `/drawings`) if you had any.
 
 Authorization
 -------------
-Policies are registered automatically for both model classes:
-- `App\\Models\\Drawing`
-- `Lastdino\\DrawingManager\\Models\\Drawing`
+A policy is registered automatically for the package model class only:
+- `Lastdino\\DrawingManager\\Models\\DrawingManagerDrawing`
 
 Default logic (`DrawingPolicy`):
 - `view`/`download`: allowed if the user has any of the drawing's allowed role names. Admins bypass.
 - `create`: allowed for admins; otherwise requires `department_id != null`.
 - `update`: allowed for admins or if `user.department_id === drawing.managing_department_id`.
 
-You may override by publishing your own policy and registering it in your app.
+If you use a host app model such as `App\\Models\\Drawing`, register your own policy mapping for it in your application.
 
 Livewire UI
 -----------
 The UI uses Flux UI components. If you don't see changes, run your frontend builder:
 - `npm run dev` or `composer run dev`
+
+You can publish the package views to customize the UI:
+
+```
+php artisan vendor:publish --tag=drawing-manager-views --no-interaction
+```
 
 Testing
 -------
@@ -111,29 +116,18 @@ Roadmap
 
 Migrations
 ----------
-This package now ships guarded, optional migrations for greenfield projects.
+This package ships migrations for greenfield projects and will auto-load them via the service provider. They are executed when you run `php artisan migrate`.
 
-- By default, migrations are NOT auto-loaded to avoid conflicts with existing tables.
-- To enable them (e.g., on a fresh project):
-
-```
-php artisan vendor:publish --tag=drawing-manager-config --no-interaction
-# then set in config/drawing-manager.php
-'load_migrations' => true,
-
-php artisan migrate --no-interaction
-```
-
-Tables created when enabled:
-- `folders` (self-referencing parent, unique per parent folder name)
+Tables provided:
+- `folders` (self-referencing parent, unique per parent+name)
 - `tags` (unique `slug`)
-- `drawings` (unique `number`, FKs to `folders` and optionally to host `departments`)
+- `drawings` (unique `number`, FKs to `folders` and optionally to host `departments` if you reference it)
 - `drawing_tag` (pivot)
 - `drawing_role` (pivot to Spatie Permission `roles`)
 
 Notes:
-- If you already have these tables, keep `load_migrations` as `false`.
-- Ensure Spatie Permission migrations are run before enabling this package's `drawing_role` pivot.
+- If you already have equivalent tables in your app, simply do not run these migrations in a fresh environment that already contains your schema.
+- Ensure Spatie Permission migrations are run before using this package's `drawing_role` pivot table.
 
 License
 -------
