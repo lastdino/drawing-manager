@@ -670,8 +670,25 @@ class Index extends Component
         foreach ($names as $name) {
             $trim = trim((string) $name);
             if ($trim === '') { continue; }
-            $slug = str($trim)->slug('-');
-            $tag = PackageTag::firstOrCreate(['slug' => $slug], ['name' => $trim]);
+
+            // 日本語など非ラテン文字のみのタグは Str::slug() が空文字になるため、
+            // 衝突しないフォールバックスラッグを生成する
+            $slug = $this->makeSlug($trim);
+
+            // まずは名前一致で既存タグを優先的に取得（以前に空スラッグで作られたものを救済）
+            $tag = PackageTag::query()->where('name', $trim)->first();
+
+            if ($tag === null) {
+                $tag = PackageTag::firstOrCreate(['slug' => $slug], ['name' => $trim]);
+            } else {
+                // 既存タグにスラッグが未設定（空文字）の場合は、今回の規則で補完する
+                $current = (string) ($tag->slug ?? '');
+                if ($current === '') {
+                    $tag->slug = $slug;
+                    $tag->save();
+                }
+            }
+
             $ids[] = (int) $tag->id;
         }
         return array_values(array_unique($ids));
@@ -686,11 +703,26 @@ class Index extends Component
         $slugs = collect($names)
             ->map(fn($n) => trim((string) $n))
             ->filter()
-            ->map(fn($n) => (string) str($n)->slug('-'))
+            ->map(fn($n) => $this->makeSlug($n))
             ->unique()
             ->values();
         if ($slugs->isEmpty()) { return []; }
         return PackageTag::query()->whereIn('slug', $slugs->all())
             ->pluck('id')->map(fn($id) => (int) $id)->all();
+    }
+
+    /**
+     * 日本語のみ等で slug() が空になる場合のフォールバックを含むスラッグ生成。
+     */
+    protected function makeSlug(string $name): string
+    {
+        $base = (string) str($name)->slug('-');
+        if ($base !== '') {
+            return mb_substr($base, 0, 80);
+        }
+
+        // 先頭に識別用プレフィックスを付け、名前のハッシュで衝突を避ける
+        $hash = substr(sha1(mb_strtolower($name)), 0, 40); // 40 <= 80
+        return 'u-' . $hash;
     }
 }
