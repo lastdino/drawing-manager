@@ -81,7 +81,8 @@ class Index extends Component
             'rename.name' => ['required', 'string', 'max:120'],
             'files.*' => ['file', 'mimes:pdf,png,jpg,jpeg,dwg,dxf', 'max:102400'],
 
-            'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawings', 'number')],
+            // テーブル名はパッケージのプレフィックス付きに統一
+            'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings', 'number')],
             'create.title' => ['required','string','max:255'],
             'create.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
             'create.managing_department_id' => ['required','integer','exists:departments,id'],
@@ -123,7 +124,8 @@ class Index extends Component
     {
         $q = DrawingManagerDrawing::query()
             ->with(['tags:id,name'])
-            ->when(!is_null($this->folderId), fn ($q) => $q->where('folder_id', $this->folderId))
+            // フォルダ指定は空文字を除外し、数値のみ受け付ける
+            ->when($this->folderId !== '' && is_numeric($this->folderId), fn ($q) => $q->where('folder_id', (int) $this->folderId))
             ->when($this->search, function ($qq) {
                 $qq->where(function ($qqq) {
                     $qqq->where('number', 'like', "%{$this->search}%")
@@ -135,13 +137,13 @@ class Index extends Component
         $tagIds = $this->resolveTagIdsByNames($names);
         if (!empty($tagIds)) {
             if (($this->filter['match'] ?? 'any') === 'all') {
-                $q->whereHas('tags', function ($qq) use ($tagIds) {
-                    foreach ($tagIds as $id) {
-                        $qq->whereHas('tags', fn($q2) => $q2->where('tags.id', $id));
-                    }
-                });
+                // すべてのタグを持つ図面のみ（AND 条件）
+                foreach ($tagIds as $id) {
+                    $q->whereHas('tags', fn ($qq) => $qq->where('drawing_manager_tags.id', $id));
+                }
             } else {
-                $q->whereHas('tags', fn($qq) => $qq->whereIn('tags.id', $tagIds));
+                // いずれかのタグを持つ図面（OR 条件）
+                $q->whereHas('tags', fn ($qq) => $qq->whereIn('drawing_manager_tags.id', $tagIds));
             }
         }
 
