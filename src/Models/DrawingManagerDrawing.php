@@ -17,8 +17,6 @@ class DrawingManagerDrawing extends Model implements HasMedia
     use HasFactory;
     use InteractsWithMedia;
 
-    protected $table = 'drawings';
-
     protected $fillable = [
         'number',
         'title',

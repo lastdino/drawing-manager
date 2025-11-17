@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class DrawingManagerFolder extends Model
 {
-    protected $table = 'folders';
 
     protected $fillable = ['name', 'parent_id'];
 
@@ -27,6 +26,6 @@ class DrawingManagerFolder extends Model
 
     public function drawings(): HasMany
     {
-        return $this->hasMany(DrawingManagerDrawing::class);
+        return $this->hasMany(DrawingManagerDrawing::class, 'folder_id');
     }
 }

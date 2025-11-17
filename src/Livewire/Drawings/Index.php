@@ -18,7 +18,7 @@ class Index extends Component
     use WithFileUploads;
 
     #[Url(as: 'folder')]
-    public ?int $folderId = null;
+    public $folderId = '';
     public string $search = '';
 
     /** @var array{tags:list<string>, match:'any'|'all'} */
@@ -63,7 +63,7 @@ class Index extends Component
     public array $files = [];
     public int $progress = 0;
     public string $uploadType = 'pdf';
-    public ?int $uploadRevision = null;
+    public $uploadRevision = '';
 
     public bool $createOpen = false;
     /** @var array{number:string,title:string,folder_id:?int,managing_department_id:?int,allowed_role_ids:array<int>,tags:list<string>} */
@@ -83,17 +83,18 @@ class Index extends Component
 
             'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawings', 'number')],
             'create.title' => ['required','string','max:255'],
-            'create.folder_id' => ['required','integer','exists:folders,id'],
+            'create.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
             'create.managing_department_id' => ['required','integer','exists:departments,id'],
             'create.allowed_role_ids' => ['required','array','min:1'],
             'create.allowed_role_ids.*' => ['integer','exists:roles,id'],
             'create.tags' => ['array','max:50'],
             'create.tags.*' => ['string','min:1','max:64'],
-            'createFile' => ['nullable','file','mimes:pdf,png,jpg,jpeg,dwg,dxf','max:102400'],
+            // 新規図面の初回ファイルは PDF のみ受け付ける
+            'createFile' => ['nullable','file','mimes:pdf','max:102400'],
 
             'edit.number' => ['nullable','string','max:120','regex:/^[\x21-\x7E]+$/'],
             'edit.title' => ['nullable','string','max:255'],
-            'edit.folder_id' => ['nullable','integer','exists:folders,id'],
+            'edit.folder_id' => ['nullable','integer','exists:drawing_manager_folders,id'],
             'edit.managing_department_id' => ['nullable','integer','exists:departments,id'],
             'edit.allowed_role_ids' => ['nullable','array'],
             'edit.allowed_role_ids.*' => ['integer','exists:roles,id'],
@@ -183,7 +184,7 @@ class Index extends Component
         $d = DrawingManagerDrawing::find($this->detailId);
         if (!$d) { return collect(); }
         return $d->getMedia('drawings')
-            ->sortBy(fn($m) => (int) $m->getCustomProperty('revision', 0))
+            ->sortByDesc(fn($m) => (int) $m->getCustomProperty('revision', 0))
             ->values();
     }
 
@@ -406,13 +407,57 @@ class Index extends Component
         Flux::modals()->close();
     }
 
+    public function openCreateModal(?int $parentId = null): void
+    {
+        $this->creatingUnder = $parentId;
+        $this->newFolderName = '';
+        $this->closeContextMenu();
+        Flux::modal('create-folder-modal')->show();
+    }
+
+    public function createFolder(): void
+    {
+        $this->validateOnly('newFolderName');
+
+        $exists = DrawingManagerFolder::query()
+            ->where('parent_id', $this->creatingUnder)
+            ->where('name', $this->newFolderName)
+            ->exists();
+        if ($exists) {
+            $this->addError('newFolderName', '同じフォルダ名が既に存在します。');
+            return;
+        }
+
+        $f = DrawingManagerFolder::create([
+            'name' => (string) $this->newFolderName,
+            'parent_id' => $this->creatingUnder,
+        ]);
+
+        if ($this->creatingUnder === null) {
+            $this->loaded['root'] = false;
+            $this->initTree();
+        } else {
+            $parent = (int) $this->creatingUnder;
+            $this->loaded[$parent] = false;
+            $this->loadChildren($parent);
+            $this->open[$parent] = true;
+        }
+
+        // 任意: 新しく作成したフォルダを選択したい場合は下記を有効化
+        // $this->folderId = (int) $f->id;
+
+        $this->newFolderName = '';
+        $this->creatingUnder = null;
+        Flux::modals()->close();
+    }
+
     public function openUpload(int $drawingId): void
     {
         $this->uploadFor = $drawingId;
         $this->files = [];
         $this->progress = 0;
         $this->uploadType = 'pdf';
-        $this->uploadRevision = null;
+        $this->uploadRevision = '';
         Flux::modal('upload-revisions-modal')->show();
     }
 
@@ -494,7 +539,7 @@ class Index extends Component
             'folder_id' => $drawing->folder_id,
             'managing_department_id' => $drawing->managing_department_id,
             'allowed_role_ids' => $drawing->allowedRoles()->pluck('roles.id')->all(),
-            'tags' => $drawing->tags()->pluck('tags.name')->all(),
+            'tags' => $drawing->tags()->pluck('name')->all(),
         ];
     }
 
@@ -510,9 +555,9 @@ class Index extends Component
         Gate::authorize('update', $drawing);
 
         $this->validate([
-            'edit.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawings','number')->ignore($drawing->id)],
+            'edit.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings','number')->ignore($drawing->id)],
             'edit.title' => ['required','string','max:255'],
-            'edit.folder_id' => ['required','integer','exists:folders,id'],
+            'edit.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
             'edit.managing_department_id' => ['required','integer','exists:departments,id'],
             'edit.allowed_role_ids' => ['required','array','min:1'],
             'edit.allowed_role_ids.*' => ['integer','exists:roles,id'],
@@ -547,8 +592,9 @@ class Index extends Component
     public function openCreateDrawing(): void
     {
         $this->createOpen = true;
+
         $this->create = [
-            'number' => '', 'title' => '', 'folder_id' => $this->folderId,
+            'number' => '', 'title' => '', 'folder_id' => (int)$this->folderId === 0 ? '' : $this->folderId,
             'managing_department_id' => '', 'allowed_role_ids' => [], 'tags' => [],
         ];
         $this->tagInput = '';
@@ -559,15 +605,16 @@ class Index extends Component
     public function saveCreateDrawing(): void
     {
         $this->validate([
-            'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawings','number')],
+            'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings','number')],
             'create.title' => ['required','string','max:255'],
-            'create.folder_id' => ['required','integer','exists:folders,id'],
+            'create.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
             'create.managing_department_id' => ['required','integer','exists:departments,id'],
             'create.allowed_role_ids' => ['required','array','min:1'],
             'create.allowed_role_ids.*' => ['integer','exists:roles,id'],
             'create.tags' => ['array','max:50'],
             'create.tags.*' => ['string','min:1','max:64'],
-            'createFile' => ['nullable','file','mimes:pdf,png,jpg,jpeg,dwg,dxf','max:102400'],
+            // 新規図面の初回ファイルは PDF のみ受け付ける
+            'createFile' => ['nullable','file','mimes:pdf','max:102400'],
         ]);
 
         Gate::authorize('create', DrawingManagerDrawing::class);
@@ -590,7 +637,7 @@ class Index extends Component
                 $media = $drawing
                     ->addMedia($this->createFile)
                     ->usingFileName($this->createFile->getClientOriginalName())
-                    ->withCustomProperties(['revision' => $revNumber, 'notes' => null])
+                    ->withCustomProperties(['revision' => $revNumber, 'kind' => 'pdf', 'notes' => null])
                     ->toMediaCollection('drawings');
                 $drawing->forceFill(['current_media_id' => $media->id])->save();
             }

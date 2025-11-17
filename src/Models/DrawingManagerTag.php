@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class DrawingManagerTag extends Model
 {
-    protected $table = 'tags';
 
     protected $fillable = ['name', 'slug'];
 

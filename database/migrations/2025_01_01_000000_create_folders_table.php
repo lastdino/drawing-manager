@@ -16,7 +16,7 @@ return new class extends Migration {
         Schema::create('drawing_manager_folders', function (Blueprint $table): void {
             $table->id();
             $table->string('name', 120);
-            $table->foreignId('parent_id')->nullable()->constrained('folders')->nullOnDelete();
+            $table->foreignId('parent_id')->nullable()->constrained('drawing_manager_folders')->nullOnDelete();
             $table->timestamps();
 
             // 同一親配下でのフォルダ名重複を禁止（必要に応じてアプリ側で解除可）

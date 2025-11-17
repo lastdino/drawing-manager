@@ -178,7 +178,7 @@
                         <template x-if="$wire.ctx.folderId">
                             <li>
                                 <button
-                                    class="w-full text左 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                    class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
                                     x-on:click="$wire.startRename($wire.ctx.folderId)"
                                 >
                                     名前を変更
@@ -239,6 +239,22 @@
                             >
                                 削除する
                             </flux:button>
+                        </div>
+                    </div>
+                </flux:modal>
+                {{-- 新規フォルダモーダル --}}
+                <flux:modal name="create-folder-modal">
+                    <div class="p-4 space-y-3">
+                        <div class="text-sm text-gray-600">親: {{ $creatingUnder === null ? '（ルート）' : $creatingUnder }}</div>
+                        <flux:field label="フォルダ名">
+                            <flux:input wire:model="newFolderName" placeholder="例: 設計/2025" />
+                        </flux:field>
+                        @error('newFolderName')
+                        <div class="text-red-600 text-sm">{{ $message }}</div>
+                        @enderror
+                        <div class="flex justify-end gap-2 pt-2">
+                            <flux:button variant="ghost" x-on:click="$flux.modal('create-folder-modal').close()">キャンセル</flux:button>
+                            <flux:button variant="primary" wire:click="createFolder">作成</flux:button>
                         </div>
                     </div>
                 </flux:modal>
@@ -576,12 +592,7 @@
                 <div class="grid gap-3 sm:grid-cols-2">
                     @foreach ($files as $i => $f)
                         <div class="rounded border p-2 space-y-1" wire:key="tmp-{{ $i }}">
-                            @if (str_starts_with($f->getMimeType(), 'image/'))
-                                <img src="{{ $f->temporaryUrl() }}" alt="preview"
-                                     class="w-full h-32 object-cover rounded"/>
-                            @else
-                                <div class="text-sm">{{ $f->getClientOriginalName() }}</div>
-                            @endif
+                            <div class="text-sm">{{ $f->getClientOriginalName() }}</div>
                             <button type="button" class="text-xs text-red-600"
                                     wire:click="$removeUpload('files', '{{ $f->getFilename() }}')">除外
                             </button>
@@ -708,7 +719,8 @@
                 </flux:field>
 
                 <div>
-                    <flux:input type="file" wire:model="createFile" label="初回ファイル（任意）"/>
+                    <flux:input type="file" wire:model="createFile" label="初回ファイル（任意）" accept="application/pdf,.pdf"/>
+                    <div class="text-xs text-black/50 dark:text-white/50 mt-1">PDF のみアップロード可能です。</div>
                 </div>
                 <div class="flex justify-end gap-2 pt-2">
                     <flux:button variant="ghost" x-on:click="$flux.modal('create-drawing-modal').close()">キャンセル

@@ -17,8 +17,8 @@ return new class extends Migration {
             $table->unsignedBigInteger('drawing_id');
             $table->unsignedBigInteger('tag_id');
 
-            $table->foreign('drawing_id')->references('id')->on('drawings')->cascadeOnDelete();
-            $table->foreign('tag_id')->references('id')->on('tags')->cascadeOnDelete();
+            $table->foreign('drawing_id')->references('id')->on('drawing_manager_drawings')->cascadeOnDelete();
+            $table->foreign('tag_id')->references('id')->on('drawing_manager_tags')->cascadeOnDelete();
 
             $table->primary(['drawing_id', 'tag_id']);
             $table->index('tag_id');

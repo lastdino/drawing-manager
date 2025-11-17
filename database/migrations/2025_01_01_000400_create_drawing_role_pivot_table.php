@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        if (Schema::hasTable('drawing_role')) {
+        if (Schema::hasTable('drawing_manager_drawing_role')) {
             return;
         }
 
@@ -17,7 +17,7 @@ return new class extends Migration {
             $table->unsignedBigInteger('drawing_id');
             $table->unsignedBigInteger('role_id'); // Spatie Permission roles.id
 
-            $table->foreign('drawing_id')->references('id')->on('drawings')->cascadeOnDelete();
+            $table->foreign('drawing_id')->references('id')->on('drawing_manager_drawings')->cascadeOnDelete();
 
             // roles テーブルが存在しない環境でも migrate できるよう、FK は条件付きで別途追加しても良いが
             // ここでは存在を前提とし、無い場合はアプリ側で先に Spatie Permission を migrate してください。
