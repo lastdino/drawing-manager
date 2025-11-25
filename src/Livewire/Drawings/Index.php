@@ -119,6 +119,56 @@ class Index extends Component
     }
 
     #[Computed]
+    public function folderOptions(): array
+    {
+        // インデントで階層が分かるラベルを作る（例: 親, "— 子", "—— 孫"）
+        $folders = DrawingManagerFolder::query()->get(['id', 'name', 'parent_id']);
+        $byId = $folders->keyBy('id');
+
+        /** @var array<int, array{path:string, depth:int}> $cache */
+        $cache = [];
+
+        $build = function ($folder) use (&$build, $byId, &$cache): array {
+            $id = (int) $folder->id;
+            if (isset($cache[$id])) {
+                return $cache[$id];
+            }
+
+            $names = [];
+            $current = $folder;
+            $guard = 0;
+            while ($current !== null) {
+                $names[] = (string) $current->name;
+                $pid = $current->parent_id ? (int) $current->parent_id : null;
+                $current = $pid ? $byId->get($pid) : null;
+                if ($guard++ > 1000) { // 循環対策ガード
+                    break;
+                }
+            }
+
+            $names = array_reverse($names);
+            $path = implode(' / ', $names); // 並び替え用のフルパス
+            $depth = max(count($names) - 1, 0);
+            return $cache[$id] = ['path' => $path, 'depth' => $depth];
+        };
+
+        $options = $folders->map(function ($f) use ($build) {
+            $meta = $build($f);
+            $indent = $meta['depth'] > 0 ? str_repeat('— ', $meta['depth']) : '';
+            return [
+                'id' => (int) $f->id,
+                'label' => $indent . (string) $f->name,
+                'path' => $meta['path'],
+            ];
+        })->sortBy('path', SORT_NATURAL | SORT_FLAG_CASE)
+            ->map(fn ($o) => ['id' => $o['id'], 'label' => $o['label']])
+            ->values()->all();
+
+        /** @var array<int, array{id:int,label:string}> $options */
+        return $options;
+    }
+
+    #[Computed]
     public function allTags(): array
     {
         return PackageTag::query()->orderBy('name')->pluck('name')->all();
@@ -137,7 +187,7 @@ class Index extends Component
     public function drawings()
     {
         $q = DrawingManagerDrawing::query()
-            ->with(['tags:id,name'])
+            ->with(['tags:id,name', 'folder:id,name'])
             // フォルダ指定は空文字を除外し、数値のみ受け付ける
             ->when($this->folderId !== '' && is_numeric($this->folderId), fn ($q) => $q->where('folder_id', (int) $this->folderId))
             ->when($this->search, function ($qq) {
@@ -162,6 +212,33 @@ class Index extends Component
         }
 
         return $q->orderBy('number')->limit(200)->get();
+    }
+
+    #[Computed]
+    public function childFolders(): array
+    {
+        $pid = null;
+        if ($this->folderId !== '' && is_numeric($this->folderId)) {
+            $pid = (int) $this->folderId;
+        }
+
+        $children = DrawingManagerFolder::query()
+            ->where('parent_id', $pid)
+            ->withCount('drawings')
+            ->orderBy('name')
+            ->get(['id','name','parent_id']);
+
+        /** @var list<array{id:int,name:string,drawings_count:int,has_children:bool}> $out */
+        $out = $children->map(function ($f) {
+            return [
+                'id' => (int) $f->id,
+                'name' => (string) $f->name,
+                'drawings_count' => (int) ($f->drawings_count ?? 0),
+                'has_children' => DrawingManagerFolder::where('parent_id', $f->id)->exists(),
+            ];
+        })->values()->all();
+
+        return $out;
     }
 
     #[Computed]
@@ -306,6 +383,17 @@ class Index extends Component
     public function endDrag(): void
     {
         $this->draggingIds = [];
+    }
+
+    /**
+     * 子フォルダへ移動（カードクリック時）
+     */
+    public function enterFolder(int $id): void
+    {
+        $this->folderId = (string) (int) $id;
+        $this->selectedIds = [];
+        $this->draggingIds = [];
+        $this->detailId = null;
     }
 
     /**

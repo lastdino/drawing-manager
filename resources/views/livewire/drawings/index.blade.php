@@ -295,6 +295,29 @@
 
         <main class="min-h-0 min-w-0 overflow-auto">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {{-- 子フォルダカード群（現在のフォルダ直下） --}}
+                @foreach ($this->childFolders as $f)
+                    <div
+                        class="border rounded p-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 select-none"
+                        wire:click="enterFolder({{ (int) $f['id'] }})"
+                    >
+                        <div class="flex items-center gap-2">
+                            <flux:icon name="folder" class="w-5 h-5 text-yellow-600" />
+                            <div class="font-semibold truncate" title="{{ $f['name'] }}">{{ $f['name'] }}</div>
+                            <div class="ms-auto text-xs text-black/60 dark:text-white/60">
+                                {{ $f['drawings_count'] }} 件
+                            </div>
+                        </div>
+                        <div class="text-xs text-black/60 dark:text-white/60 mt-1">
+                            @if($f['has_children'])
+                                子フォルダあり
+                            @else
+                                子フォルダなし
+                            @endif
+                        </div>
+                    </div>
+                @endforeach
+
                 @foreach ($this->drawings as $d)
                     @php($selected = in_array($d->id, $selectedIds ?? []))
                     <div
@@ -325,6 +348,9 @@
                             @endif
                         </div>
                         <div class="text-gray-700 truncate" title="{{ $d->title }}">{{ $d->title }}</div>
+                        <div class="text-xs text-black/60 dark:text-white/60 truncate" title="フォルダ: {{ optional($d->folder)->name ?? '（ルート）' }}">
+                            フォルダ: {{ optional($d->folder)->name ?? '（ルート）' }}
+                        </div>
                         <div class="flex flex-wrap gap-1 py-1">
                             @foreach ($d->tags as $tag)
                                 <flux:badge>{{ $tag->name }}</flux:badge>
@@ -371,8 +397,8 @@
                                 <flux:input label="図番" wire:model.defer="edit.number"/>
                                 <flux:input label="タイトル" wire:model.defer="edit.title"/>
                                 <flux:select wire:model="edit.folder_id" placeholder="保存先" label="フォルダ">
-                                    @foreach(\Lastdino\DrawingManager\Models\DrawingManagerFolder::orderBy('name')->get() as $f)
-                                        <flux:select.option value="{{ $f->id }}">{{ $f->name }}</flux:select.option>
+                                    @foreach($this->folderOptions as $opt)
+                                        <flux:select.option value="{{ $opt['id'] }}">{{ $opt['label'] }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
                                 {{-- 管理部署は廃止（UI削除） --}}
@@ -676,8 +702,8 @@
                     <flux:input label="図番" wire:model.defer="create.number" placeholder="例: A-101"/>
                     <flux:input label="タイトル" wire:model.defer="create.title" placeholder="例: 1F 平面図"/>
                     <flux:select wire:model="create.folder_id" placeholder="保存先" label="フォルダ">
-                        @foreach(\Lastdino\DrawingManager\Models\DrawingManagerFolder::orderBy('name')->get() as $f)
-                            <flux:select.option value="{{ $f->id }}">{{ $f->name }}</flux:select.option>
+                        @foreach($this->folderOptions as $opt)
+                            <flux:select.option value="{{ $opt['id'] }}">{{ $opt['label'] }}</flux:select.option>
                         @endforeach
                     </flux:select>
                     {{-- 管理部署は廃止（UI削除） --}}
