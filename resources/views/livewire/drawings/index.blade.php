@@ -80,13 +80,26 @@
                 </flux:button>
             </div>
 
-            <flux:button icon="plus" variant="primary" wire:click="openCreateDrawing">新規図面を追加</flux:button>
+            @can('create', \Lastdino\DrawingManager\Models\DrawingManagerDrawing::class)
+                <flux:button icon="plus" variant="primary" wire:click="openCreateDrawing">新規図面を追加</flux:button>
+            @endcan
         </div>
     </div>
     <div class="grid grid-cols-12 gap-4 p-4">
         <aside class="col-span-12 md:col-span-3 border rounded p-2">
             <div class="flex items-center justify-between gap-2 mb-2　w-full">
-                <flux:button size="sm" variant="ghost" wire:click="$set('folderId', null)">すべて/未分類</flux:button>
+                <flux:button
+                    size="sm"
+                    variant="ghost"
+                    wire:click="$set('folderId', null)"
+                    x-data="{ over:false }"
+                    @dragover.prevent="over = ($wire.draggingIds || []).length > 0"
+                    @dragleave.prevent="over = false"
+                    @drop.prevent="((($wire.draggingIds||[]).length>0) && $wire.moveDrawings($wire.draggingIds, null)), (over=false)"
+                    x-bind:class="over ? 'bg-black/5 dark:bg-white/10' : ''"
+                >
+                    すべて/未分類
+                </flux:button>
                 <flux:button size="sm" icon="plus" variant="ghost" inset
                              wire:click="openCreateModal({{ $folderId ?? 'null' }})"
                              tooltip="現在の階層にフォルダ作成"/>
@@ -120,10 +133,29 @@
 
                 <ul class="space-y-0.5">
                     @foreach ($slice as $node)
+                        @php($isOpen = !empty($open[$node['id']]))
                         <li class="flex items-center justify-between"
                             wire:key="folder-node-{{ $node['id'] }}-{{ $node['depth'] }}"
-                            @contextmenu.stop.prevent="$wire.openContextMenu({{ $node['id'] }}, $event.clientX, $event.clientY)">
-                            <div class="flex items-center min-w-0">
+                            @contextmenu.stop.prevent="$wire.openContextMenu({{ $node['id'] }}, $event.clientX, $event.clientY)"
+                            x-data="{
+                                over:false,
+                                timer:null,
+                                startHover(){
+                                    if (this.timer) { return }
+                                    // 一定時間（500ms）ドラッグオーバーしたら自動展開
+                                    this.timer = setTimeout(() => {
+                                        this.timer = null;
+                                        // 子がある場合のみ開く（ensureOpen は冪等で、連続実行しても閉じません）
+                                        if ({{ $node['has_children'] ? 'true' : 'false' }}) { $wire.ensureOpen({{ (int) $node['id'] }}); }
+                                    }, 500)
+                                },
+                                endHover(){ if (this.timer) { clearTimeout(this.timer); this.timer = null } }
+                            }"
+                            @dragover.prevent="((($wire.draggingIds||[]).length>0) && (over=true, startHover()))"
+                            @dragleave.prevent="(over=false, endHover())"
+                            @drop.prevent="((($wire.draggingIds||[]).length>0) && $wire.moveDrawings($wire.draggingIds, {{ (int) $node['id'] }})), (over=false, endHover())"
+                        >
+                            <div class="flex items-center min-w-0" x-bind:class="over ? 'bg-black/5 dark:bg-white/10 rounded' : ''">
                                 @if ($node['has_children'])
                                     <button class="text-xs text-gray-500 me-1"
                                             style="padding-left: {{ $node['depth'] * 16 }}px"
@@ -264,8 +296,26 @@
         <main class="col-span-12 md:col-span-9">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 @foreach ($this->drawings as $d)
-                    <div class="border rounded p-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
-                         wire:click="openDetail({{ $d->id }})">
+                    @php($selected = in_array($d->id, $selectedIds ?? []))
+                    <div
+                        class="border rounded p-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 select-none {{ $selected ? 'ring-2 ring-blue-600 bg-black/5 dark:bg-white/5' : '' }}"
+                        draggable="true"
+                        x-data
+                        @dragstart.stop="$wire.startDrag({{ $d->id }})"
+                        @dragend.stop="$wire.endDrag()"
+                        @click.prevent="(($wire.draggingIds || []).length > 0) || $wire.openDetail({{ $d->id }})"
+                    >
+                        <div class="flex items-start gap-2">
+                            <label class="mt-1 inline-flex items-center gap-2 text-xs text-black/60 dark:text-white/60">
+                                <input type="checkbox"
+                                       @click.stop
+                                       wire:click="toggleSelect({{ $d->id }})"
+                                       {{ $selected ? 'checked' : '' }}
+                                >
+                                選択
+                            </label>
+                            <div class="ms-auto"></div>
+                        </div>
                         <div class="flex items-center gap-2">
                             <div class="font-semibold">{{ $d->number }}</div>
                             @php($cm = $d->currentMedia())
@@ -325,13 +375,7 @@
                                         <flux:select.option value="{{ $f->id }}">{{ $f->name }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
-                                <flux:select wire:model="edit.managing_department_id" placeholder="管理部署"
-                                             label="管理部署">
-                                    @foreach(\App\Models\Department::orderBy('name')->get() as $dept)
-                                        <flux:select.option
-                                            value="{{ $dept->id }}">{{ $dept->name }}</flux:select.option>
-                                    @endforeach
-                                </flux:select>
+                                {{-- 管理部署は廃止（UI削除） --}}
                                 <flux:field>
                                     <flux:label>ダウンロード許可ロール</flux:label>
                                     <select multiple class="w-full border rounded px-2 py-1 min-h-[120px]"
@@ -341,6 +385,17 @@
                                         @endforeach
                                     </select>
                                     <flux:error name="edit.allowed_role_ids"/>
+                                </flux:field>
+
+                                <flux:field>
+                                    <flux:label>編集可能ロール</flux:label>
+                                    <select multiple class="w-full border rounded px-2 py-1 min-h-[120px]"
+                                            wire:model="edit.editor_role_ids">
+                                        @foreach(\Spatie\Permission\Models\Role::orderBy('name')->get() as $role)
+                                            <option value="{{ $role->id }}">{{ $role->name }}</option>
+                                        @endforeach
+                                    </select>
+                                    <flux:error name="edit.editor_role_ids"/>
                                 </flux:field>
 
                                 {{-- タグ（microcms 風：チップス + サジェスト） --}}
@@ -447,10 +502,7 @@
                                 <div class="text-xs text-black/60 dark:text-white/60">フォルダ</div>
                                 <div class="text-sm">{{ optional($this->detail->folder)->name }}</div>
                             </div>
-                            <div>
-                                <div class="text-xs text-black/60 dark:text-white/60">管理部署</div>
-                                <div class="text-sm">{{ optional($this->detail->managingDepartment)->name }}</div>
-                            </div>
+                            {{-- 管理部署は廃止（表示削除） --}}
                         </div>
 
                         <div class="mt-2">
@@ -465,33 +517,37 @@
                         </div>
 
                         <div class="flex gap-2 pt-1 items-center">
-                            <flux:dropdown>
-                                <flux:button size="sm" variant="ghost">種別を選んで最新版をダウンロード</flux:button>
-                                <flux:menu>
-                                    @if($this->downloadOptions['has_pdf'])
-                                        <flux:menu.item as="a"
-                                                        href="{{ route('drawings.download.latest', ['drawing' => $this->detail, 'type' => 'pdf']) }}">
-                                            PDF の最新版
-                                        </flux:menu.item>
-                                        <flux:menu.separator/>
-                                    @endif
-
-                                    @forelse ($this->downloadOptions['cad_types'] as $t)
-                                        <flux:menu.item as="a"
-                                                        href="{{ route('drawings.download.latest', ['drawing' => $this->detail, 'type' => $t]) }}">
-                                            {{ strtoupper($t) }} の最新版
-                                        </flux:menu.item>
-                                    @empty
-                                        @if(!$this->downloadOptions['has_pdf'])
-                                            <flux:menu.item disabled>ダウンロード可能な種別がありません</flux:menu.item>
+                            @can('download', $this->detail)
+                                <flux:dropdown>
+                                    <flux:button size="sm" variant="ghost">種別を選んで最新版をダウンロード</flux:button>
+                                    <flux:menu>
+                                        @if($this->downloadOptions['has_pdf'])
+                                            <flux:menu.item as="a"
+                                                            href="{{ route('drawings.download.latest', ['drawing' => $this->detail, 'type' => 'pdf']) }}">
+                                                PDF の最新版
+                                            </flux:menu.item>
+                                            <flux:menu.separator/>
                                         @endif
-                                    @endforelse
-                                </flux:menu>
-                            </flux:dropdown>
 
-                            <flux:button size="sm" variant="primary"
-                                         wire:click="openUpload({{ (int) $this->detailId }})">版をアップロード
-                            </flux:button>
+                                        @forelse ($this->downloadOptions['cad_types'] as $t)
+                                            <flux:menu.item as="a"
+                                                            href="{{ route('drawings.download.latest', ['drawing' => $this->detail, 'type' => $t]) }}">
+                                                {{ strtoupper($t) }} の最新版
+                                            </flux:menu.item>
+                                        @empty
+                                            @if(!$this->downloadOptions['has_pdf'])
+                                                <flux:menu.item disabled>ダウンロード可能な種別がありません</flux:menu.item>
+                                            @endif
+                                        @endforelse
+                                    </flux:menu>
+                                </flux:dropdown>
+                            @endcan
+
+                            @can('update', $this->detail)
+                                <flux:button size="sm" variant="primary"
+                                             wire:click="openUpload({{ (int) $this->detailId }})">版をアップロード
+                                </flux:button>
+                            @endcan
                         </div>
 
                         <div class="pt-2">
@@ -504,8 +560,10 @@
                                         <div class="text-sm truncate"
                                              title="{{ $m->file_name }}">{{ $m->file_name }}</div>
                                         <div class="ms-auto flex items-center gap-2">
-                                            <a class="text-blue-600 underline"
-                                               href="{{ route('drawings.download.revision', $m) }}">DL</a>
+                                            @can('download', $this->detail)
+                                                <a class="text-blue-600 underline"
+                                                   href="{{ route('drawings.download.revision', $m) }}">DL</a>
+                                            @endcan
                                         </div>
                                     </div>
                                 @empty
@@ -622,11 +680,7 @@
                             <flux:select.option value="{{ $f->id }}">{{ $f->name }}</flux:select.option>
                         @endforeach
                     </flux:select>
-                    <flux:select wire:model="create.managing_department_id" placeholder="管理部署" label="管理部署">
-                        @foreach(\App\Models\Department::orderBy('name')->get() as $dept)
-                            <flux:select.option value="{{ $dept->id }}">{{ $dept->name }}</flux:select.option>
-                        @endforeach
-                    </flux:select>
+                    {{-- 管理部署は廃止（UI削除） --}}
                 </div>
 
                 <flux:field>
@@ -638,6 +692,17 @@
                         @endforeach
                     </select>
                     <flux:error name="create.allowed_role_ids"/>
+                </flux:field>
+
+                <flux:field>
+                    <flux:label>編集可能ロール</flux:label>
+                    <select multiple class="w-full border rounded px-2 py-1 min-h-[120px]"
+                            wire:model="create.editor_role_ids">
+                        @foreach(\Spatie\Permission\Models\Role::orderBy('name')->get() as $role)
+                            <option value="{{ $role->id }}">{{ $role->name }}</option>
+                        @endforeach
+                    </select>
+                    <flux:error name="create.editor_role_ids"/>
                 </flux:field>
 
                 {{-- タグ（microcms 風：チップス + サジェスト） --}}

@@ -17,6 +17,18 @@ class Index extends Component
 {
     use WithFileUploads;
 
+    /**
+     * ドラッグ中の図面ID（複数対応）
+     * @var array<int>
+     */
+    public array $draggingIds = [];
+
+    /**
+     * 選択中の図面ID（複数選択）
+     * @var array<int>
+     */
+    public array $selectedIds = [];
+
     #[Url(as: 'folder')]
     public $folderId = '';
     public string $search = '';
@@ -51,10 +63,10 @@ class Index extends Component
     public ?int $detailId = null;
     public bool $editOpen = false;
 
-    /** @var array{number:string,title:string,folder_id:?int,managing_department_id:?int,allowed_role_ids:array<int>,tags:list<string>} */
+    /** @var array{number:string,title:string,folder_id:?int,allowed_role_ids:array<int>,tags:list<string>} */
     public array $edit = [
         'number' => '', 'title' => '', 'folder_id' => null,
-        'managing_department_id' => null, 'allowed_role_ids' => [], 'tags' => [],
+        'allowed_role_ids' => [], 'tags' => [],
     ];
     public string $editTagInput = '';
 
@@ -66,10 +78,10 @@ class Index extends Component
     public $uploadRevision = '';
 
     public bool $createOpen = false;
-    /** @var array{number:string,title:string,folder_id:?int,managing_department_id:?int,allowed_role_ids:array<int>,tags:list<string>} */
+    /** @var array{number:string,title:string,folder_id:?int,allowed_role_ids:array<int>,tags:list<string>} */
     public array $create = [
         'number' => '', 'title' => '', 'folder_id' => null,
-        'managing_department_id' => null, 'allowed_role_ids' => [], 'tags' => [],
+        'allowed_role_ids' => [], 'tags' => [],
     ];
     public string $tagInput = '';
     public $createFile = null; // TemporaryUploadedFile|null
@@ -85,7 +97,7 @@ class Index extends Component
             'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings', 'number')],
             'create.title' => ['required','string','max:255'],
             'create.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
-            'create.managing_department_id' => ['required','integer','exists:departments,id'],
+            // 管理部署は廃止
             'create.allowed_role_ids' => ['required','array','min:1'],
             'create.allowed_role_ids.*' => ['integer','exists:roles,id'],
             'create.tags' => ['array','max:50'],
@@ -96,9 +108,11 @@ class Index extends Component
             'edit.number' => ['nullable','string','max:120','regex:/^[\x21-\x7E]+$/'],
             'edit.title' => ['nullable','string','max:255'],
             'edit.folder_id' => ['nullable','integer','exists:drawing_manager_folders,id'],
-            'edit.managing_department_id' => ['nullable','integer','exists:departments,id'],
+            // 管理部署は廃止
             'edit.allowed_role_ids' => ['nullable','array'],
             'edit.allowed_role_ids.*' => ['integer','exists:roles,id'],
+            'edit.editor_role_ids' => ['nullable','array'],
+            'edit.editor_role_ids.*' => ['integer','exists:roles,id'],
             'edit.tags' => ['array','max:50'],
             'edit.tags.*' => ['string','min:1','max:64'],
         ];
@@ -249,6 +263,106 @@ class Index extends Component
         return view('drawing-manager::livewire.drawings.index');
     }
 
+    /**
+     * カード選択のトグル
+     */
+    public function toggleSelect(int $drawingId): void
+    {
+        $id = (int) $drawingId;
+        $exists = in_array($id, $this->selectedIds, true);
+        if ($exists) {
+            $this->selectedIds = array_values(array_filter($this->selectedIds, fn ($x) => (int) $x !== $id));
+            return;
+        }
+        $this->selectedIds[] = $id;
+    }
+
+    /**
+     * 選択をクリア
+     */
+    public function clearSelection(): void
+    {
+        $this->selectedIds = [];
+    }
+
+    /**
+     * ドラッグ開始時に呼ぶ（フロントから）
+     */
+    public function startDrag(int $sourceId): void
+    {
+        $sid = (int) $sourceId;
+        // 複数選択済みならそれを採用、そうでなければ単一
+        if (!empty($this->selectedIds) && in_array($sid, $this->selectedIds, true)) {
+            $this->draggingIds = array_values(array_unique(array_map('intval', $this->selectedIds)));
+            return;
+        }
+        $this->draggingIds = [$sid];
+    }
+
+    /**
+     * ドラッグ終了
+     */
+    public function endDrag(): void
+    {
+        $this->draggingIds = [];
+    }
+
+    /**
+     * 図面のまとめて移動
+     * @param array<int> $ids
+     */
+    public function moveDrawings(array $ids, ?int $toFolderId): void
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if (empty($ids)) {
+            return;
+        }
+
+        $dest = null;
+        if (!empty($toFolderId)) {
+            $dest = DrawingManagerFolder::query()->findOrFail((int) $toFolderId);
+        }
+
+        // 件数補正のため、フォルダごとの増減をカウント
+        $dec = [];
+        $inc = [];
+
+        foreach ($ids as $id) {
+            $drawing = DrawingManagerDrawing::query()->with('folder')->findOrFail((int) $id);
+            Gate::authorize('update', $drawing);
+
+            $fromId = $drawing->folder_id ? (int) $drawing->folder_id : null;
+            $toId = $dest?->id;
+            if ($fromId === ($toId ?? null)) {
+                continue;
+            }
+
+            $drawing->update(['folder_id' => $toId]);
+
+            if ($fromId !== null) { $dec[$fromId] = ($dec[$fromId] ?? 0) + 1; }
+            if ($toId !== null) { $inc[$toId] = ($inc[$toId] ?? 0) + 1; }
+        }
+
+        // ツリー件数の簡易補正
+        if (!empty($dec) || !empty($inc)) {
+            foreach ($this->tree as $pid => $nodes) {
+                foreach (($nodes ?? []) as $i => $n) {
+                    $nid = (int) $n['id'];
+                    if (isset($dec[$nid])) {
+                        $this->tree[$pid][$i]['drawings_count'] = max(0, ((int) $n['drawings_count']) - $dec[$nid]);
+                    }
+                    if (isset($inc[$nid])) {
+                        $this->tree[$pid][$i]['drawings_count'] = ((int) $n['drawings_count']) + $inc[$nid];
+                    }
+                }
+            }
+        }
+
+        // UI 状態リセット
+        $this->draggingIds = [];
+        $this->selectedIds = [];
+    }
+
     public function initTree(): void
     {
         if (!empty($this->loaded['root'])) { return; }
@@ -305,6 +419,19 @@ class Index extends Component
         if ($isOpen) {
             $this->open[$id] = false;
             $this->closeSubtree($id);
+            return;
+        }
+        $this->open[$id] = true;
+        $this->loadChildren($id);
+    }
+
+    /**
+     * フォルダを「開く」だけに限定（冪等）。
+     * ドラッグオーバーの自動展開では toggle() ではなくこちらを使用する。
+     */
+    public function ensureOpen(int $id): void
+    {
+        if (! empty($this->open[$id])) {
             return;
         }
         $this->open[$id] = true;
@@ -455,6 +582,10 @@ class Index extends Component
 
     public function openUpload(int $drawingId): void
     {
+        // 認可チェック：版アップロードは更新権限が必要
+        $drawing = DrawingManagerDrawing::query()->findOrFail($drawingId);
+        Gate::authorize('update', $drawing);
+
         $this->uploadFor = $drawingId;
         $this->files = [];
         $this->progress = 0;
@@ -539,8 +670,8 @@ class Index extends Component
             'number' => $drawing->number,
             'title' => $drawing->title,
             'folder_id' => $drawing->folder_id,
-            'managing_department_id' => $drawing->managing_department_id,
             'allowed_role_ids' => $drawing->allowedRoles()->pluck('roles.id')->all(),
+            'editor_role_ids' => $drawing->editableRoles()->pluck('roles.id')->all(),
             'tags' => $drawing->tags()->pluck('name')->all(),
         ];
     }
@@ -560,9 +691,10 @@ class Index extends Component
             'edit.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings','number')->ignore($drawing->id)],
             'edit.title' => ['required','string','max:255'],
             'edit.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
-            'edit.managing_department_id' => ['required','integer','exists:departments,id'],
             'edit.allowed_role_ids' => ['required','array','min:1'],
             'edit.allowed_role_ids.*' => ['integer','exists:roles,id'],
+            'edit.editor_role_ids' => ['nullable','array'],
+            'edit.editor_role_ids.*' => ['integer','exists:roles,id'],
             'edit.tags' => ['array','max:50'],
             'edit.tags.*' => ['string','min:1','max:64'],
         ]);
@@ -572,11 +704,13 @@ class Index extends Component
                 'number' => $this->edit['number'],
                 'title' => $this->edit['title'],
                 'folder_id' => $this->edit['folder_id'],
-                'managing_department_id' => $this->edit['managing_department_id'],
             ])->save();
 
             $roleIds = array_map('intval', (array) ($this->edit['allowed_role_ids'] ?? []));
             $drawing->allowedRoles()->sync($roleIds);
+
+            $editorRoleIds = array_map('intval', (array) ($this->edit['editor_role_ids'] ?? []));
+            $drawing->editableRoles()->sync($editorRoleIds);
 
             $ids = $this->ensureTagIdsFromNames((array) ($this->edit['tags'] ?? []));
             $drawing->tags()->sync($ids);
@@ -593,11 +727,14 @@ class Index extends Component
 
     public function openCreateDrawing(): void
     {
+        // 作成モーダルを開く前に作成権限をチェック
+        Gate::authorize('create', DrawingManagerDrawing::class);
+
         $this->createOpen = true;
 
         $this->create = [
             'number' => '', 'title' => '', 'folder_id' => (int)$this->folderId === 0 ? '' : $this->folderId,
-            'managing_department_id' => '', 'allowed_role_ids' => [], 'tags' => [],
+            'allowed_role_ids' => [], 'editor_role_ids' => [], 'tags' => [],
         ];
         $this->tagInput = '';
         $this->createFile = null;
@@ -610,7 +747,6 @@ class Index extends Component
             'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings','number')],
             'create.title' => ['required','string','max:255'],
             'create.folder_id' => ['required','integer','exists:drawing_manager_folders,id'],
-            'create.managing_department_id' => ['required','integer','exists:departments,id'],
             'create.allowed_role_ids' => ['required','array','min:1'],
             'create.allowed_role_ids.*' => ['integer','exists:roles,id'],
             'create.tags' => ['array','max:50'],
@@ -626,12 +762,16 @@ class Index extends Component
                 'number' => $this->create['number'],
                 'title' => $this->create['title'],
                 'folder_id' => $this->create['folder_id'],
-                'managing_department_id' => $this->create['managing_department_id'],
             ]);
 
             $roleIds = array_map('intval', (array) ($this->create['allowed_role_ids'] ?? []));
             if (!empty($roleIds)) {
                 $drawing->allowedRoles()->sync($roleIds);
+            }
+
+            $editorRoleIds = array_map('intval', (array) ($this->create['editor_role_ids'] ?? []));
+            if (!empty($editorRoleIds)) {
+                $drawing->editableRoles()->sync($editorRoleIds);
             }
 
             if ($this->createFile) {
@@ -649,7 +789,7 @@ class Index extends Component
 
             $this->createOpen = false;
             $this->create = [
-                'number' => '', 'title' => '', 'folder_id' => $this->folderId, 'managing_department_id' => null, 'allowed_role_ids' => [], 'tags' => [],
+                'number' => '', 'title' => '', 'folder_id' => $this->folderId, 'allowed_role_ids' => [], 'tags' => [],
             ];
             $this->createFile = null;
             Flux::modals()->close();

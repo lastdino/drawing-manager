@@ -21,7 +21,6 @@ class DrawingManagerDrawing extends Model implements HasMedia
         'number',
         'title',
         'folder_id',
-        'managing_department_id',
         'current_media_id',
     ];
 
@@ -32,16 +31,18 @@ class DrawingManagerDrawing extends Model implements HasMedia
         return $this->belongsTo(DrawingManagerFolder::class);
     }
 
-    public function managingDepartment(): BelongsTo
-    {
-        // Department はホストアプリ側のモデルを利用
-        return $this->belongsTo(\App\Models\Department::class, 'managing_department_id');
-    }
-
     public function allowedRoles(): BelongsToMany
     {
         // 役割は Spatie Permission の Role を利用
         return $this->belongsToMany(\Spatie\Permission\Models\Role::class, 'drawing_manager_drawing_role', 'drawing_id', 'role_id');
+    }
+
+    /**
+     * 図面の「編集可能」ロール（閲覧可の allowedRoles とは別管理）
+     */
+    public function editableRoles(): BelongsToMany
+    {
+        return $this->belongsToMany(\Spatie\Permission\Models\Role::class, 'drawing_editable_roles', 'drawing_id', 'role_id');
     }
 
     public function tags(): BelongsToMany
