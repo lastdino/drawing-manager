@@ -190,7 +190,8 @@ class Index extends Component
     #[Computed]
     public function detail(): ?DrawingManagerDrawing
     {
-        return $this->detailId ? DrawingManagerDrawing::query()->with(['folder', 'managingDepartment'])->find($this->detailId) : null;
+        // 管理部署は廃止したため、該当リレーションの eager load は削除
+        return $this->detailId ? DrawingManagerDrawing::query()->with(['folder'])->find($this->detailId) : null;
     }
 
     #[Computed]

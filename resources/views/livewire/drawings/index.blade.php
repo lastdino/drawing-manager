@@ -1,4 +1,4 @@
-<div>
+<div class="h-dvh grid grid-rows-[auto_1fr]">
     <div class="flex flex-col gap-2 mb-3">
         <div class="flex items-center gap-1">
             <flux:breadcrumbs>
@@ -85,8 +85,8 @@
             @endcan
         </div>
     </div>
-    <div class="grid grid-cols-12 gap-4 p-4">
-        <aside class="col-span-12 md:col-span-3 border rounded p-2">
+    <div class="min-h-0 grid grid-cols-[280px_1fr] gap-4 p-4">
+        <aside class="min-h-0 overflow-hidden border rounded p-2">
             <div class="flex items-center justify-between gap-2 mb-2　w-full">
                 <flux:button
                     size="sm"
@@ -107,7 +107,7 @@
 
             <div
                 x-data="{ itemH: 28, onScroll(e){ const el = e.target; const start = Math.max(0, Math.floor(el.scrollTop / this.itemH) - 5); const size = Math.ceil(el.clientHeight / this.itemH) + 10; $wire.$set('windowStart', start); $wire.$set('windowSize', size); } }"
-                class="max-h-[60vh] overflow-auto"
+                class="h-full overflow-auto"
                 x-init="$wire.initTree()"
                 @scroll.throttle.50ms="onScroll($event)"
                 @contextmenu.self.prevent="$wire.openContextMenu(null, $event.clientX, $event.clientY)"
@@ -293,7 +293,7 @@
             </div>
         </aside>
 
-        <main class="col-span-12 md:col-span-9">
+        <main class="min-h-0 min-w-0 overflow-auto">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 @foreach ($this->drawings as $d)
                     @php($selected = in_array($d->id, $selectedIds ?? []))
@@ -337,7 +337,7 @@
         </main>
 
         {{-- 詳細フライアウト（右側） --}}
-        <flux:modal name="drawing-detail-flyout" variant="flyout" position="right">
+        <flux:modal name="drawing-detail-flyout" variant="flyout" position="right" @close="cancelEdit">
             <div class="p-4 space-y-4 w-full md:w-[28rem]">
                 @if($this->detail)
                     {{-- ヘッダ行：図番 + Rev + 編集ボタン --}}
