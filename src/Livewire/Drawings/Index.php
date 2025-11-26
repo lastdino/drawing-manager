@@ -91,7 +91,8 @@ class Index extends Component
         return [
             'newFolderName' => ['required', 'string', 'max:120'],
             'rename.name' => ['required', 'string', 'max:120'],
-            'files.*' => ['file', 'mimes:pdf,png,jpg,jpeg,dwg,dxf', 'max:102400'],
+            // 具体的な許可拡張子のチェックは saveRevisions() 側で uploadType に応じて行う
+            'files.*' => ['file', 'max:102400'],
 
             // テーブル名はパッケージのプレフィックス付きに統一
             'create.number' => ['required','string','max:120','regex:/^[\x21-\x7E]+$/', Rule::unique('drawing_manager_drawings', 'number')],
@@ -303,13 +304,11 @@ class Index extends Component
                 $type = strtolower((string) $m->getCustomProperty('cad_type'));
             }
             if (!$type) {
-                if (in_array($ext, ['dwg','dxf','stp','step','igs','iges'], true)) {
-                    $type = $ext;
+                if (in_array($ext, $this->cadExtensionsForValidation(), true)) {
+                    $type = $this->normalizeCadType($ext);
                 }
             }
-            if ($type === 'stp') { $type = 'step'; }
-            if ($type === 'igs') { $type = 'iges'; }
-            if ($type && in_array($type, ['dwg','dxf','step','iges'], true)) {
+            if ($type && in_array($type, $this->cadConfig()['extensions'], true)) {
                 $types[] = $type;
             }
         }
@@ -705,7 +704,7 @@ class Index extends Component
         } else {
             $this->validate([
                 'uploadRevision' => ['required','integer','min:1'],
-                'files.*' => ['file','extensions:dwg,dxf,step,stp,iges,igs','max:102400'],
+                'files.*' => ['file','extensions:'.implode(',', $this->cadExtensionsForValidation()),'max:102400'],
             ]);
         }
 
@@ -721,9 +720,7 @@ class Index extends Component
             } else {
                 $rev = (int) $this->uploadRevision;
                 $ext = strtolower(pathinfo($file->getClientOriginalName(), PATHINFO_EXTENSION));
-                $cadType = match ($ext) {
-                    'dwg' => 'dwg', 'dxf' => 'dxf', 'stp','step' => 'step', 'igs','iges' => 'iges', default => $ext,
-                };
+                $cadType = $this->normalizeCadType($ext);
                 $drawing->addMedia($file)
                     ->usingFileName($file->getClientOriginalName())
                     ->withCustomProperties(['revision' => $rev,'kind' => 'cad','cad_type' => $cadType,'notes' => null])
@@ -735,6 +732,69 @@ class Index extends Component
         $this->uploadRevision = null;
         $this->uploadType = 'pdf';
         Flux::modals()->close();
+    }
+
+    /**
+     * CAD 設定（config）を取得し、大小文字や重複を整理した配列を返す。
+     *
+     * @return array{extensions:array<int,string>,aliases:array<string,string>,accept_extra:array<int,string>}
+     */
+    private function cadConfig(): array
+    {
+        $cfg = (array) config('drawing-manager.cad', []);
+        $extensions = array_values(array_unique(array_map('strtolower', (array) ($cfg['extensions'] ?? []))));
+        $aliases    = array_change_key_case((array) ($cfg['aliases'] ?? []), CASE_LOWER);
+        $acceptExtra= array_values(array_unique(array_map('strtolower', (array) ($cfg['accept_extra'] ?? []))));
+
+        if (empty($extensions)) {
+            $extensions = ['dwg', 'dxf', 'step', 'iges'];
+        }
+
+        return [
+            'extensions'   => $extensions,
+            'aliases'      => $aliases,
+            'accept_extra' => $acceptExtra,
+        ];
+    }
+
+    /**
+     * バリデーションで許可する“物理拡張子”一覧（aliases の左辺も含める）
+     *
+     * @return array<int,string>
+     */
+    private function cadExtensionsForValidation(): array
+    {
+        $cfg = $this->cadConfig();
+        $physical = $cfg['extensions'];
+        foreach ($cfg['aliases'] as $physicalExt => $logicalExt) {
+            $physical[] = $physicalExt;
+        }
+        return array_values(array_unique($physical));
+    }
+
+    /**
+     * 実拡張子を論理拡張子へ正規化
+     */
+    private function normalizeCadType(string $ext): string
+    {
+        $ext = strtolower($ext);
+        $cfg = $this->cadConfig();
+        if (isset($cfg['aliases'][$ext])) {
+            return $cfg['aliases'][$ext];
+        }
+        return $ext;
+    }
+
+    #[Computed]
+    public function cadAcceptString(): string
+    {
+        $cfg = $this->cadConfig();
+        $physical = $this->cadExtensionsForValidation();
+        foreach ($cfg['accept_extra'] as $ext) {
+            $physical[] = $ext;
+        }
+        $physical = array_values(array_unique($physical));
+        return implode(',', array_map(fn($e) => '.'.$e, $physical));
     }
 
     public function openDetail(int $drawingId): void

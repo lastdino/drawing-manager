@@ -17,14 +17,7 @@ class DownloadController
             Gate::authorize('download', $drawing);
         }
 
-        $normalize = static function (string $t): string {
-            return match (strtolower($t)) {
-                'stp' => 'step',
-                'igs' => 'iges',
-                default => strtolower($t),
-            };
-        };
-        $type = $normalize($type);
+        $type = $this->normalizeCadType($type);
 
         $all = $drawing->getMedia('drawings');
 
@@ -38,13 +31,13 @@ class DownloadController
                 return $ext === 'pdf' || str_starts_with((string) $m->mime_type, 'application/pdf');
             });
         } else {
-            $candidates = $all->filter(function ($m) use ($type, $normalize) {
+            $candidates = $all->filter(function ($m) use ($type) {
                 $kind = $m->getCustomProperty('kind');
                 if (($kind ?? 'pdf') === 'cad') {
-                    $cadType = $normalize((string) $m->getCustomProperty('cad_type'));
+                    $cadType = $this->normalizeCadType((string) $m->getCustomProperty('cad_type'));
                     return $cadType === $type;
                 }
-                $ext = $normalize(strtolower(pathinfo($m->file_name, PATHINFO_EXTENSION)));
+                $ext = $this->normalizeCadType(strtolower(pathinfo($m->file_name, PATHINFO_EXTENSION)));
                 return $ext === $type;
             });
         }
@@ -85,5 +78,18 @@ class DownloadController
                 'Content-Type' => $media->mime_type ?? 'application/octet-stream',
             ]
         );
+    }
+
+    /**
+     * 実拡張子を論理拡張子へ正規化
+     */
+    private function normalizeCadType(string $ext): string
+    {
+        $ext = strtolower($ext);
+        $aliases = array_change_key_case((array) (config('drawing-manager.cad.aliases') ?? []), CASE_LOWER);
+        if (isset($aliases[$ext])) {
+            return $aliases[$ext];
+        }
+        return $ext;
     }
 }

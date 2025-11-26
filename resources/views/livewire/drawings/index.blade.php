@@ -654,7 +654,7 @@
                         <p class="text-xs text-black/60 dark:text-white/60">または</p>
                         <label class="inline-flex items-center gap-2 px-3 py-2 rounded border cursor-pointer">
                             <input type="file" class="hidden" multiple wire:model="files"
-                                   x-bind:accept="$wire.uploadType === 'pdf' ? '.pdf' : '.dwg,.dxf,.step,.stp,.iges,.igs'">
+                                   x-bind:accept="$wire.uploadType === 'pdf' ? '.pdf' : '{{ $this->cadAcceptString }}'">
                             ファイルを選択
                         </label>
                     </div>

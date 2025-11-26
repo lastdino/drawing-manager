@@ -1,6 +1,8 @@
 Lastdino Drawing Manager
 =======================
 
+English | [日本語](README.ja.md)
+
 Drawing management (folders, tags, revisions) for Laravel 12 with Livewire 3 and Flux UI.
 
 Features
@@ -11,6 +13,7 @@ Features
 - Create / Edit drawings (number, title, folder, managing department, allowed roles, tags)
 - Upload revisions (PDF creates a new revision; CAD attaches to an existing PDF revision)
 - Secure downloads via policies (PDF and CAD types)
+ - Configurable CAD type aliases (e.g. map `stp` → `step`, `igs` → `iges`)
 
 Requirements
 ------------
@@ -61,6 +64,24 @@ Config `config/drawing-manager.php`:
 - `middleware`: UI middleware (default `['web','auth']`)
 - `authorize_download`: Check policy before streaming files (default `true`)
 - `media_disk`: Disk used by Spatie Media Library (default `local`)
+- `cad.aliases`: Normalize/alias CAD extensions. Keys are incoming extensions, values are canonical names.
+
+Example configuration for CAD aliases:
+
+```
+return [
+    // ...
+    'cad' => [
+        // When a user requests or uploads these extensions,
+        // they will be treated as the canonical value on the right.
+        'aliases' => [
+            'stp' => 'step',
+            'igs' => 'iges',
+            'dft' => 'dxf',
+        ],
+    ],
+];
+```
 
 4) Routes
 ---------
@@ -70,6 +91,11 @@ The package auto-registers routes (names in parentheses):
 - GET `/{prefix}/revisions/{media}` → download a specific media item (`drawings.download.revision`)
 
 Remove conflicting host routes under the same prefix (default `/drawings`) if you had any.
+
+Latest download behavior:
+- The `{type}` segment is normalized using `config('drawing-manager.cad.aliases')`. For example, requesting `/drawings/{id}/latest/stp` returns the latest `step` file.
+- For `pdf`, the latest media item is selected by checking a custom property `kind=pdf`, or by file extension / MIME type.
+- For CAD, the latest media is selected by matching either `custom_properties: { kind: 'cad', cad_type: ... }` or by the file extension.
 
 Authorization
 -------------
@@ -82,6 +108,10 @@ Default logic (`DrawingPolicy`):
 - `update`: allowed for admins or if `user.department_id === drawing.managing_department_id`.
 
 If you use a host app model such as `App\\Models\\Drawing`, register your own policy mapping for it in your application.
+
+Downloads authorization:
+- When `config('drawing-manager.authorize_download')` is `true` (default), downloads call `Gate::authorize('download', $drawing)` before streaming files.
+- Set this to `false` only if you fully protect routes via middleware and are comfortable skipping per-model policy checks.
 
 Livewire UI
 -----------
@@ -107,6 +137,20 @@ it('shows drawings page', function () {
 });
 ```
 
+Download endpoint example (Pest):
+
+```
+it('downloads latest step using stp alias', function () {
+    $user = User::factory()->create();
+    $drawing = DrawingManagerDrawing::factory()->create();
+    // attach media with custom properties: kind=cad, cad_type=step, revision=1
+    // ...
+    $this->actingAs($user)
+        ->get("/drawings/{$drawing->getKey()}/latest/stp")
+        ->assertOk();
+});
+```
+
 Roadmap
 -------
 - Publishable migrations for greenfield projects
@@ -128,6 +172,11 @@ Tables provided:
 Notes:
 - If you already have equivalent tables in your app, simply do not run these migrations in a fresh environment that already contains your schema.
 - Ensure Spatie Permission migrations are run before using this package's `drawing_role` pivot table.
+
+Tips (UI / Build)
+-----------------
+- The UI is built with Livewire 3 and Flux UI. If frontend changes are not reflected, run your builder: `npm run dev` or `composer run dev`.
+- When customizing the UI, consider publishing the package views and keeping your changes under version control.
 
 License
 -------
